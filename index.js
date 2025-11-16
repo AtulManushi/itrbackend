@@ -11,29 +11,33 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const Admin = require("./models/adminModel");
 
-
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
 // MongoDB connection
-mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+mongoose
+  .connect(process.env.MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
   .then(() => console.log("✅ MongoDB connected"))
-  .catch(err => console.log("MongoDB error:", err));
+  .catch((err) => console.log("MongoDB error:", err));
 
 // Schema
 const OrderSchema = new mongoose.Schema({
   orderId: String,
   plan: String,
-  tenure: String,
+  tenure: {type: String, default: "1 year"},
   amount: Number,
   name: String,
-  isPaymentComplete:{type:Boolean, default:false},
+  isPaymentComplete: { type: Boolean, default: false },
   email: String,
+  service: String,
   contact: String,
   location: String,
   status: { type: String, default: "pending" },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
 });
 
 const Order = mongoose.model("Order", OrderSchema);
@@ -47,13 +51,13 @@ const razorpay = new Razorpay({
 // 1️⃣ Create order and store user data
 app.post("/create-order", async (req, res) => {
   try {
-    const { amount, plan, tenure, name, email, contact, location } = req.body;
+    const { amount, plan, tenure, name, email, service, contact, location } = req.body;
 
     const options = {
       amount: amount * 100, // in paise
       currency: "INR",
       receipt: `receipt_${Date.now()}`,
-      notes: { plan, tenure, name, email, contact, location },
+      notes: { plan, tenure, name, email, service, contact, location },
     };
 
     const order = await razorpay.orders.create(options);
@@ -66,6 +70,7 @@ app.post("/create-order", async (req, res) => {
       amount,
       name,
       email,
+      service,
       contact,
       location,
       status: "pending",
@@ -90,10 +95,10 @@ app.post("/verify-payment", async (req, res) => {
 
   if (generated_signature === signature) {
     await Order.findOneAndUpdate(
-    { orderId: order_id },
-    { status: "paid", isPaymentComplete: true },
-    { new: true }
-  );
+      { orderId: order_id },
+      { status: "paid", isPaymentComplete: true },
+      { new: true }
+    );
     res.json({ success: true });
   } else {
     await Order.findOneAndUpdate({ orderId: order_id }, { status: "failed" });
@@ -106,7 +111,9 @@ app.post("/contact", async (req, res) => {
     const { name, contact, email, city } = req.body;
 
     if (!name || !contact || !email || !city) {
-      return res.status(400).json({ success: false, message: "All fields required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "All fields required" });
     }
 
     const newEntry = new Contact({ name, contact, email, city });
@@ -168,16 +175,16 @@ app.post("/admin/login", async (req, res) => {
   res.json({ message: "Login successful", token });
 });
 
-
 // Change password
 app.post("/admin/change-password", verifyToken, async (req, res) => {
   const { oldPassword, newPassword } = req.body;
-console.log("ddd", oldPassword, "new", newPassword)
+  console.log("ddd", oldPassword, "new", newPassword);
   const admin = await Admin.findById(req.admin.id);
   if (!admin) return res.status(404).json({ message: "Admin not found" });
 
   const isMatch = await bcrypt.compare(oldPassword, admin.password);
-  if (!isMatch) return res.status(400).json({ message: "Incorrect old password" });
+  if (!isMatch)
+    return res.status(400).json({ message: "Incorrect old password" });
 
   const hashed = await bcrypt.hash(newPassword, 10);
   admin.password = hashed;
@@ -185,7 +192,6 @@ console.log("ddd", oldPassword, "new", newPassword)
 
   res.json({ message: "Password updated successfully" });
 });
-
 
 // ============================
 // 🔹 ADMIN DASHBOARD ROUTES 🔹
@@ -201,7 +207,7 @@ app.get("/admin/contacts/count", verifyToken, async (req, res) => {
   }
 });
 
-app.get("/admin/orders/count",verifyToken, async (req, res) => {
+app.get("/admin/orders/count", verifyToken, async (req, res) => {
   try {
     const count = await Order.countDocuments();
     res.json(count);
@@ -211,7 +217,7 @@ app.get("/admin/orders/count",verifyToken, async (req, res) => {
   }
 });
 
-app.get("/admin/orders/paid/count",verifyToken, async (req, res) => {
+app.get("/admin/orders/paid/count", verifyToken, async (req, res) => {
   try {
     const count = await Order.countDocuments({
       isPaymentComplete: true,
@@ -224,7 +230,7 @@ app.get("/admin/orders/paid/count",verifyToken, async (req, res) => {
   }
 });
 
-app.get("/admin/orders/unpaid",verifyToken, async (req, res) => {
+app.get("/admin/orders/unpaid", verifyToken, async (req, res) => {
   try {
     const count = await Order.countDocuments({
       $or: [{ isPaymentComplete: false }, { status: { $ne: "paid" } }],
@@ -236,7 +242,7 @@ app.get("/admin/orders/unpaid",verifyToken, async (req, res) => {
   }
 });
 
-app.get("/admin/contacts",verifyToken, async (req, res) => {
+app.get("/admin/contacts", verifyToken, async (req, res) => {
   try {
     const contacts = await Contact.find().sort({ createdAt: -1 });
     res.json(contacts);
@@ -245,7 +251,7 @@ app.get("/admin/contacts",verifyToken, async (req, res) => {
   }
 });
 
-app.get("/admin/orders",verifyToken, async (req, res) => {
+app.get("/admin/orders", verifyToken, async (req, res) => {
   try {
     const orders = await Order.find().sort({ createdAt: -1 });
     res.json(orders);
@@ -269,7 +275,6 @@ app.get("/admin/orders/paid", verifyToken, async (req, res) => {
   }
 });
 
-
 app.get("/admin/orders/pending", verifyToken, async (req, res) => {
   try {
     const pendingOrders = await Order.find({
@@ -282,7 +287,6 @@ app.get("/admin/orders/pending", verifyToken, async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 });
-
 
 app.listen(process.env.PORT, () =>
   console.log(`🚀 Server running on http://localhost:${process.env.PORT}`)
